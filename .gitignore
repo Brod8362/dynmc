@@ -1,1 +1,4 @@
 server.properties
+*.so
+test.py
+*.pyc
