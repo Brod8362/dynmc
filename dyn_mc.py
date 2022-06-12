@@ -1,8 +1,11 @@
 #!/bin/python3
+import base64
 import os
 import socket
 import json
 import subprocess
+from threading import Event, Thread
+import time
 
 SEGMENT_BITS = 0x7F
 CONTINUE_BIT = 0x80
@@ -43,6 +46,58 @@ def to_var_int(value) -> bytes:
 
 def to_packet_str(data: str) -> bytes:
     return to_var_int(len(data)) + data.encode("utf-8")
+
+class ServerMonitor(Thread):
+    def __init__(self, event, host: str, port: int, delay = 30, limit = 20):
+        Thread.__init__(self)
+        self.stopped = event
+        self.delay = delay
+        self.host = host
+        self.port = port
+        self.limit = limit
+        self._consecutive = 0
+
+    def run(self):
+        while not self.stopped.wait(self.delay):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(10)
+            s.connect((self.host, self.port))
+
+            # send handshake packet
+            packet = bytearray()
+            packet.append(0x00) #packet ID
+            packet += to_var_int(500) # protocol version
+            packet += to_packet_str(self.host) #host used to connect
+            packet.append(self.port & 0xFF) #lo byte of port
+            packet.append(self.port >> 8) #hi byte of port
+            packet += to_var_int(0x01)
+            s.send(to_var_int(len(packet)) + bytes(packet)) #send the packet
+
+            #now, send the request packet
+            packet = bytearray()
+            packet.append(0x00)
+            s.send(to_var_int(len(packet)) + bytes(packet))
+
+            # recv response
+            data = s.recv(4096)
+            s.close()
+            pos = 0
+            total_length, read = read_var_int(data, begin = pos)
+            pos+=read
+            packet_id, read = read_var_int(data, begin = pos)
+            pos+=read
+            json_length, read = read_var_int(data, begin = pos)
+            pos+=read
+            json_str = data[pos:].decode("utf-8")
+            jsond = json.loads(json_str)
+            if jsond['players']['online'] == 0:
+                self._consecutive+=1
+            else:
+                self._consecutive = 0
+
+            if self._consecutive >= self.limit:
+                print("server shutdown time")
+                #shutdown the server
 
 def main():
     if not os.path.exists("server.properties"):
@@ -85,8 +140,10 @@ def main():
     sock = socket.socket(
         socket.AF_INET, socket.SOCK_STREAM
     )
-    sock.bind(("127.0.0.1", SERVER_PORT))
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("0.0.0.0", SERVER_PORT))
     sock.listen(2)
+    print("listening for connections...")
     while True:
         conn, addr = sock.accept()
         data = conn.recv(1024)
@@ -100,8 +157,8 @@ def main():
         pos += read
         protocol_version, read = read_var_int(data, begin = pos);
         pos += read
-        print(f"RAWLEN: {len(data)} DLEN: {length} ID:{packet_id} PROTO:{protocol_version}")
-        print(f"{addr}: {data}")
+        # print(f"RAWLEN: {len(data)} DLEN: {length} ID:{packet_id} PROTO:{protocol_version}")
+        # print(f"{addr}: {data}")
         if packet_id == 0x00: #handshake packet
             if data[-1] == 0x01: # STATUS
                 #build packet here
@@ -124,6 +181,11 @@ def main():
                         ]
                     }
                 }
+                if os.path.exists("server-icon.png"):
+                    with open("server-icon.png", "rb") as fd:
+                        data = fd.read()
+                        b64 = base64.b64encode(data.replace("\n",""))
+                        response_json["favicon"] = f"data:image/png;base64,{b64}"
                 json_data = json.dumps(response_json)
                 packet = bytearray()
                 packet.append(0x00) # write packet ID
@@ -140,7 +202,21 @@ def main():
                 conn.send(to_var_int(len(packet)) + bytes(packet))
                 conn.close()
                 sock.close()
-                subprocess.run(["./start.sh"], shell=True)
+                #TODO: rcon handle shutting down the server here
+                process = subprocess.Popen(["./start.sh"], shell=True) #RUN server
+                stop_flag = Event()
+                server_monitor = ServerMonitor(stop_flag, "localhost", SERVER_PORT)
+                server_monitor.start()
+                process.wait()
+                stop_flag.set()
+                #after server shuts down, reopen the socket
+                time.sleep(1)
+                sock = socket.socket(
+                    socket.AF_INET, socket.SOCK_STREAM
+                )
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(("0.0.0.0", SERVER_PORT))
+                sock.listen(2)
         elif packet_id == 0x01: #ping packet
             conn.send(data)
             conn.close()
