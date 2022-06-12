@@ -2,6 +2,7 @@
 import os
 import socket
 import json
+import subprocess
 
 SEGMENT_BITS = 0x7F
 CONTINUE_BIT = 0x80
@@ -46,6 +47,10 @@ def to_packet_str(data: str) -> bytes:
 def main():
     if not os.path.exists("server.properties"):
         print("cannot find server.properties, exiting")
+        os._exit(1)
+
+    if not os.path.exists("./start.sh"):
+        print("cannot find start.sh, exiting")
         os._exit(1)
 
     server_properties = {}
@@ -124,8 +129,18 @@ def main():
                 packet.append(0x00) # write packet ID
                 packet.extend(to_packet_str(json_data))
                 conn.send(to_var_int(len(packet)) + bytes(packet))
+                conn.close()
             elif data[-1] == 0x02: # LOGIN
-                pass
+                packet = bytearray()
+                packet.append(0x00)
+                response_json = {
+                    "text": "Server startup will now occur, please wait and reconnect shortly."
+                }
+                packet += (to_packet_str(json.dumps(response_json)))
+                conn.send(to_var_int(len(packet)) + bytes(packet))
+                conn.close()
+                sock.close()
+                subprocess.run(["./start.sh"], shell=True)
         elif packet_id == 0x01: #ping packet
             conn.send(data)
             conn.close()

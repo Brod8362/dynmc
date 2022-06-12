@@ -2,3 +2,4 @@ server.properties
 *.so
 test.py
 *.pyc
+__pycache__
