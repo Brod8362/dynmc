@@ -1,6 +1,7 @@
 #!/bin/python3
 import argparse
 import base64
+from datetime import datetime
 import json
 import math
 import os
@@ -15,6 +16,11 @@ from mcrcon import MCRcon
 
 SEGMENT_BITS = 0x7F
 CONTINUE_BIT = 0x80
+
+def log(msg: str):
+    time = datetime.now()
+    timestamp = time.strftime("%H:%M:%S")
+    print(f"[{timestamp}] [dynmc]: {msg}")
 
 def read_var_int(buf: bytes, begin = 0):
     """Read a varint
@@ -99,15 +105,17 @@ class ServerMonitor(Thread):
             pos+=read
             json_str = data[pos:].decode("utf-8")
             jsond = json.loads(json_str)
-            if jsond['players']['online'] == 0:
+            online = jsond['players']['online']
+            if online == 0:
                 self._consecutive+=1
             else:
                 self._consecutive = 0
 
-            if self._consecutive >= self.limit:
+            if self._consecutive >= self.limit and online == 0:
                 with MCRcon(self.host, self.password) as mcr:
+                    log(f"Server has been empty for {self.limit*30} seconds, shutting down")
                     resp = mcr.command("/stop")
-                    print(resp)
+                    log(resp)
 
 def main():
     EMPTY_TIME = 600
@@ -153,6 +161,8 @@ def main():
         print("rcon is not enabled")
         os._exit(1)
 
+    log(f"Server will shut down if empty for {cliargs.emptytime} seconds")
+
     RCON_PASSWORD = server_properties["rcon.password"]
 
     SERVER_MOTD = server_properties.get("motd", "")
@@ -163,14 +173,11 @@ def main():
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((BIND_ADDRESS, SERVER_PORT))
     sock.listen(2)
-    print("listening for connections...")
+    log(f"Listening for connections on {BIND_ADDRESS}:{SERVER_PORT}")
     while True:
         conn, addr = sock.accept()
         data = conn.recv(1024)
         pos = 0
-        if data[0] == 0xFE:
-            print("SLP packet ignored")
-            continue
         length, read = read_var_int(data, begin = pos)
         pos += read
         packet_id, read = read_var_int(data, begin = pos);
@@ -180,6 +187,7 @@ def main():
         if packet_id == 0x00: #handshake packet
             if data[-1] == 0x01: # STATUS
                 #build packet here
+                log(f"Sending server status to {addr}")
                 response_json = {
                     "version": {
                         "name": "1.19",
@@ -211,6 +219,7 @@ def main():
                 conn.send(to_var_int(len(packet)) + bytes(packet))
                 conn.close()
             elif data[-1] == 0x02: # LOGIN
+                log(f"{addr} initiated server startup")
                 packet = bytearray()
                 packet.append(0x00)
                 response_json = {
@@ -225,10 +234,12 @@ def main():
                 stop_flag = Event()
                 server_monitor = ServerMonitor(stop_flag, BIND_ADDRESS, SERVER_PORT, RCON_PASSWORD, time = cliargs.emptytime)
                 server_monitor.start()
+                log("Monitoring server player status")
                 process.wait()
                 stop_flag.set()
                 #after server shuts down, reopen the socket
                 time.sleep(1)
+                log("Reclaiming control and listening for new connections")
                 sock = socket.socket(
                     socket.AF_INET, socket.SOCK_STREAM
                 )
