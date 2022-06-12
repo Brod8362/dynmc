@@ -163,8 +163,6 @@ def main():
         pos += read
         protocol_version, read = read_var_int(data, begin = pos);
         pos += read
-        # print(f"RAWLEN: {len(data)} DLEN: {length} ID:{packet_id} PROTO:{protocol_version}")
-        # print(f"{addr}: {data}")
         if packet_id == 0x00: #handshake packet
             if data[-1] == 0x01: # STATUS
                 #build packet here
