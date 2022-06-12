@@ -1,13 +1,17 @@
 #!/bin/python3
+import argparse
 import base64
+import json
+import math
 import os
 import socket
-import json
 import subprocess
-from threading import Event, Thread
 import time
+from threading import Event, Thread
+
 from mcrcon import MCRcon
 """mcrcon must be version ==0.6.0!"""
+
 
 SEGMENT_BITS = 0x7F
 CONTINUE_BIT = 0x80
@@ -50,21 +54,23 @@ def to_packet_str(data: str) -> bytes:
     return to_var_int(len(data)) + data.encode("utf-8")
 
 class ServerMonitor(Thread):
-    def __init__(self, event, host: str, port: int, rcon_password: str, delay = 30, limit = 20):
+    def __init__(self, event, host: str, port: int, rcon_password: str, time: int = 600):
         Thread.__init__(self)
         self.stopped = event
-        self.delay = delay
         self.host = host
         self.port = port
-        self.limit = limit
+        self.limit = math.ceil(time/30)
         self.password = rcon_password
         self._consecutive = 0
 
     def run(self):
-        while not self.stopped.wait(self.delay):
+        while not self.stopped.wait(30):
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(10)
-            s.connect((self.host, self.port))
+            try:
+                s.connect((self.host, self.port))
+            except:
+                continue
 
             # send handshake packet
             packet = bytearray()
@@ -104,6 +110,13 @@ class ServerMonitor(Thread):
                     print(resp)
 
 def main():
+    EMPTY_TIME = 600
+    if "DYNMC_EMPTY_TIME" in os.environ:
+        EMPTY_TIME = int(os.environ["DYNMC_EMPTY_TIME"])
+    argp = argparse.ArgumentParser(description="dynamic minecraft server manager")
+    argp.add_argument("--empty-time", dest="emptytime", type=int, default=EMPTY_TIME)
+    cliargs = argp.parse_args()
+
     if not os.path.exists("server.properties"):
         print("cannot find server.properties, exiting")
         os._exit(1)
@@ -127,6 +140,7 @@ def main():
         print("server port not specified")
         os._exit(1)
 
+    BIND_ADDRESS = server_properties.get("server-ip", "0.0.0.0")
     SERVER_PORT = int(server_properties["server-port"])
 
     if "rcon.port" not in server_properties:
@@ -147,7 +161,7 @@ def main():
         socket.AF_INET, socket.SOCK_STREAM
     )
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("0.0.0.0", SERVER_PORT))
+    sock.bind((BIND_ADDRESS, SERVER_PORT))
     sock.listen(2)
     print("listening for connections...")
     while True:
@@ -209,7 +223,7 @@ def main():
                 #TODO: rcon handle shutting down the server here
                 process = subprocess.Popen(["./start.sh"], shell=True) #RUN server
                 stop_flag = Event()
-                server_monitor = ServerMonitor(stop_flag, "localhost", SERVER_PORT, RCON_PASSWORD, limit = 1)
+                server_monitor = ServerMonitor(stop_flag, BIND_ADDRESS, SERVER_PORT, RCON_PASSWORD, time = cliargs.emptytime)
                 server_monitor.start()
                 process.wait()
                 stop_flag.set()
@@ -219,7 +233,7 @@ def main():
                     socket.AF_INET, socket.SOCK_STREAM
                 )
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                sock.bind(("0.0.0.0", SERVER_PORT))
+                sock.bind((BIND_ADDRESS, SERVER_PORT))
                 sock.listen(2)
         elif packet_id == 0x01: #ping packet
             conn.send(data)
