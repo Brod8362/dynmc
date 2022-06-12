@@ -3,3 +3,4 @@ server.properties
 test.py
 *.pyc
 __pycache__
+server/

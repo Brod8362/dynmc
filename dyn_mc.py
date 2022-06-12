@@ -144,8 +144,6 @@ def main():
         elif packet_id == 0x01: #ping packet
             conn.send(data)
             conn.close()
-
-
     
 if __name__ == "__main__":
     main()
