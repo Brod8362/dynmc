@@ -60,7 +60,7 @@ def to_packet_str(data: str) -> bytes:
     return to_var_int(len(data)) + data.encode("utf-8")
 
 class ServerMonitor(Thread):
-    def __init__(self, event, host: str, port: int, rcon_password: str, time: int = 600):
+    def __init__(self, event, host: str, port: int, rcon_password: str, time: int = 600, rcon_port: int = 25575):
         Thread.__init__(self)
         self.stopped = event
         self.host = host
@@ -68,6 +68,7 @@ class ServerMonitor(Thread):
         self.limit = math.ceil(time/30)
         self.password = rcon_password
         self._consecutive = 0
+        self.rcon_port = rcon_port
 
     def run(self):
         while not self.stopped.wait(30):
@@ -112,7 +113,7 @@ class ServerMonitor(Thread):
                 self._consecutive = 0
 
             if self._consecutive >= self.limit and online == 0:
-                with MCRcon(self.host, self.password) as mcr:
+                with MCRcon(self.host, self.password, port = self.rcon_port) as mcr:
                     log(f"Server has been empty for {self.limit*30} seconds, shutting down")
                     resp = mcr.command("/stop")
                     log(resp)
@@ -232,7 +233,7 @@ def main():
                 #TODO: rcon handle shutting down the server here
                 process = subprocess.Popen(["./start.sh"], shell=True) #RUN server
                 stop_flag = Event()
-                server_monitor = ServerMonitor(stop_flag, BIND_ADDRESS, SERVER_PORT, RCON_PASSWORD, time = cliargs.emptytime)
+                server_monitor = ServerMonitor(stop_flag, BIND_ADDRESS, SERVER_PORT, RCON_PASSWORD, time = cliargs.emptytime, rcon_port = RCON_PORT)
                 server_monitor.start()
                 log("Monitoring server player status")
                 process.wait()
