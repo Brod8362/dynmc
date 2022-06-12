@@ -6,6 +6,8 @@ import json
 import subprocess
 from threading import Event, Thread
 import time
+from mcrcon import MCRcon
+"""mcrcon must be version ==0.6.0!"""
 
 SEGMENT_BITS = 0x7F
 CONTINUE_BIT = 0x80
@@ -48,13 +50,14 @@ def to_packet_str(data: str) -> bytes:
     return to_var_int(len(data)) + data.encode("utf-8")
 
 class ServerMonitor(Thread):
-    def __init__(self, event, host: str, port: int, delay = 30, limit = 20):
+    def __init__(self, event, host: str, port: int, rcon_password: str, delay = 30, limit = 20):
         Thread.__init__(self)
         self.stopped = event
         self.delay = delay
         self.host = host
         self.port = port
         self.limit = limit
+        self.password = rcon_password
         self._consecutive = 0
 
     def run(self):
@@ -96,8 +99,9 @@ class ServerMonitor(Thread):
                 self._consecutive = 0
 
             if self._consecutive >= self.limit:
-                print("server shutdown time")
-                #shutdown the server
+                with MCRcon(self.host, self.password) as mcr:
+                    resp = mcr.command("/stop")
+                    print(resp)
 
 def main():
     if not os.path.exists("server.properties"):
@@ -134,6 +138,8 @@ def main():
     if server_properties.get("enable-rcon", "false") == "false":
         print("rcon is not enabled")
         os._exit(1)
+
+    RCON_PASSWORD = server_properties["rcon.password"]
 
     SERVER_MOTD = server_properties.get("motd", "")
 
@@ -205,7 +211,7 @@ def main():
                 #TODO: rcon handle shutting down the server here
                 process = subprocess.Popen(["./start.sh"], shell=True) #RUN server
                 stop_flag = Event()
-                server_monitor = ServerMonitor(stop_flag, "localhost", SERVER_PORT)
+                server_monitor = ServerMonitor(stop_flag, "localhost", SERVER_PORT, RCON_PASSWORD, limit = 1)
                 server_monitor.start()
                 process.wait()
                 stop_flag.set()
