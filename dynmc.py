@@ -17,6 +17,9 @@ from mcrcon import MCRcon
 SEGMENT_BITS = 0x7F
 CONTINUE_BIT = 0x80
 
+class InvalidVarInt(Exception):
+    pass
+
 def log(msg: str):
     time = datetime.now()
     timestamp = time.strftime("%H:%M:%S")
@@ -39,12 +42,16 @@ def read_var_int(buf: bytes, begin = 0):
     byte = 0x00
     idx = 0;
     while True:
+        if (begin+idx >= len(buf)):
+            raise InvalidVarInt("ran out of bytes to read")
         byte = buf[begin+idx]
         idx += 1
         value |= (byte & SEGMENT_BITS) << pos
         if ((byte & CONTINUE_BIT) == 0):
             break
         pos += 7;
+        if (pos >= 32):
+            raise InvalidVarInt("too long")
     return (value, idx)
 
 def to_var_int(value) -> bytes:
@@ -179,12 +186,19 @@ def main():
         conn, addr = sock.accept()
         data = conn.recv(1024)
         pos = 0
-        length, read = read_var_int(data, begin = pos)
-        pos += read
-        packet_id, read = read_var_int(data, begin = pos);
-        pos += read
-        protocol_version, read = read_var_int(data, begin = pos);
-        pos += read
+        try:
+            length, read = read_var_int(data, begin = pos)
+            pos += read
+            packet_id, read = read_var_int(data, begin = pos);
+            pos += read
+            protocol_version, read = read_var_int(data, begin = pos);
+            pos += read
+        except InvalidVarInt as e:
+            log(f"Received invalid packet")
+            continue
+        except Exception as e:
+            log(f"Unhandled exception: {e}")
+            continue
         if packet_id == 0x00: #handshake packet
             if data[-1] == 0x01: # STATUS
                 #build packet here
