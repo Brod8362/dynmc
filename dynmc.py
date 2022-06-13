@@ -183,8 +183,12 @@ def main():
     sock.listen(2)
     log(f"Listening for connections on {BIND_ADDRESS}:{SERVER_PORT}")
     while True:
-        conn, addr = sock.accept()
-        data = conn.recv(1024)
+        try:
+            conn, addr = sock.accept()
+            data = conn.recv(1024)
+        except Exception as e:
+            log(f"Failed to connect with {addr}: {e}")
+            continue
         pos = 0
         try:
             length, read = read_var_int(data, begin = pos)
