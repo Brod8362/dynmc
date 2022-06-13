@@ -115,7 +115,7 @@ class ServerMonitor(Thread):
             if self._consecutive >= self.limit and online == 0:
                 with MCRcon(self.host, self.password, port = self.rcon_port) as mcr:
                     log(f"Server has been empty for {self.limit*30} seconds, shutting down")
-                    resp = mcr.command("/stop")
+                    resp = mcr.command("stop")
                     log(resp)
 
 def main():
